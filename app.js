@@ -11,6 +11,27 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Validate required environment variables at startup
+const requiredEnvVars = [
+  'GETTING_ALL_DRIVERS_URL',
+  'GETTING_DISPATCHERS_URL',
+  'GETTING_TOKEN_URL',
+  'DB_HOST',
+  'DB_USER',
+  'DB_NAME',
+  'DB_PASSWORD',
+  'DITAT_APPLICATION_ROLE',
+  'DITAT_ACCOUNT_ID',
+  'DITAT_AUTHORIZATION',
+];
+
+for (const varName of requiredEnvVars) {
+  if (!process.env[varName]) {
+    console.error(`❌ Missing required environment variable: ${varName}`);
+    process.exit(1);
+  }
+}
+
 const {
   GETTING_ALL_DRIVERS_URL,
   GETTING_DISPATCHERS_URL,
@@ -19,6 +40,9 @@ const {
   DB_USER,
   DB_NAME,
   DB_PASSWORD,
+  DITAT_APPLICATION_ROLE,
+  DITAT_ACCOUNT_ID,
+  DITAT_AUTHORIZATION,
 } = process.env;
 
 const dispatcherIdAndName = {
@@ -39,13 +63,29 @@ const dispatcherIDs = [
   12, 28, 53, 57, 65, 70, 72, 78, 79, 80, 81
 ];
 
+// Create a MySQL connection pool
+const pool = mysql.createPool({
+  host: DB_HOST,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  ssl: {
+    ca: fs.readFileSync(path.join(__dirname, 'client_certification', 'server-ca.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'client_certification', 'client-cert.pem')),
+    key: fs.readFileSync(path.join(__dirname, 'client_certification', 'client-key.pem')),
+  }
+});
+
 // Get API token
 async function getApiToken() {
   console.log("---------------------- Getting API token -------------------");
   const headers = {
-    "Ditat-Application-Role": "Login to TMS",
-    "ditat-account-id": "agylogistics",
-    "Authorization": "Basic aG9zaGVscDp3RkxIbTYub2th",
+    "Ditat-Application-Role": DITAT_APPLICATION_ROLE,
+    "ditat-account-id": DITAT_ACCOUNT_ID,
+    "Authorization": DITAT_AUTHORIZATION,
   };
   try {
     const { data } = await axios.post(GETTING_TOKEN_URL, {}, { headers });
@@ -119,40 +159,65 @@ async function getAllDispatchersData(apiToken) {
 
 //  Upsert drivers into DB
 async function upsertDrivers(drivers) {
-  const connection = await mysql.createConnection({
-    host: DB_HOST,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    database: DB_NAME,
-    ssl: {
-      ca: fs.readFileSync(path.join(__dirname, 'client_certification', 'server-ca.pem')),
-      cert: fs.readFileSync(path.join(__dirname, 'client_certification', 'client-cert.pem')),
-      key: fs.readFileSync(path.join(__dirname, 'client_certification', 'client-key.pem')),
-    }
-  });
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    console.log("Database connection success");
 
-  console.log("Database connection success");
-
-  const sql = `
-    INSERT INTO drivers (id, driverId, status, firstName, lastName, truckId, phoneNumber, email, hiredOn, updatedOn, companyId, dispatcher, firstLanguage, secondLanguage, globalDnd, safetyCall, safetyMessage, hosSupport, maintainanceCall, maintainanceMessage, dispatchCall, dispatchMessage, accountCall, accountMessage)
-    VALUES (?, ?)
-    ON DUPLICATE KEY UPDATE driver_data = VALUES(driver_data)
+    const sql = `
+    INSERT INTO drivers (
+      driverId, status, firstName, lastName, truckId, phoneNumber, email, hiredOn, updatedOn,
+      companyId, dispatcher, firstLanguage, secondLanguage,
+      globalDnd, safetyCall, safetyMessage, hosSupport,
+      maintainanceCall, maintainanceMessage,
+      dispatchCall, dispatchMessage,
+      accountCall, accountMessage
+    )
+    VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+    ON DUPLICATE KEY UPDATE
+      status = VALUES(status),
+      firstName = VALUES(firstName),
+      lastName = VALUES(lastName),
+      truckId = VALUES(truckId),
+      phoneNumber = VALUES(phoneNumber),
+      email = VALUES(email),
+      updatedOn = VALUES(updatedOn),
+      companyId = VALUES(companyId),
+      dispatcher = VALUES(dispatcher),
+      firstLanguage = VALUES(firstLanguage),
+      secondLanguage = VALUES(secondLanguage),
+      globalDnd = VALUES(globalDnd),
+      safetyCall = VALUES(safetyCall),
+      safetyMessage = VALUES(safetyMessage),
+      hosSupport = VALUES(hosSupport),
+      maintainanceCall = VALUES(maintainanceCall),
+      maintainanceMessage = VALUES(maintainanceMessage),
+      dispatchCall = VALUES(dispatchCall),
+      dispatchMessage = VALUES(dispatchMessage),
+      accountCall = VALUES(accountCall),
+      accountMessage = VALUES(accountMessage)
   `;
 
-  try {
     for (const driver of drivers) {
-      const driverId = driver[0];
-      const driverJson = JSON.stringify(driver).replace("[","").replace("]","").replace("\\","").replace(/"/g,"");
-      console.log(`♻♻♻ Upserting driverId: ${driverId}`);
-      await connection.execute(sql, [driverId, driverJson]);
-      console.log(`♻♻♻ Driver ${driverId} data processing success`);
+      const params = [
+        driver["driverId"], driver["status"], driver["firstName"], driver["lastName"], driver["truckId"],
+        driver["phoneNumber"], driver["email"], driver["hiredOn"], new Date(), driver["companyId"],
+        driver["dispatcher"], driver["firstLanguage"], driver["secondLanguage"], driver["globalDnd"],
+        driver["safetyCall"], driver["safetyMessage"], driver["hosSupport"], driver["maintainanceCall"],
+        driver["maintainanceMessage"], driver["dispatchCall"], driver["dispatchMessage"],
+        driver["accountCall"], driver["accountMessage"]
+      ];
+      await connection.execute(sql, params);
+      console.log(`♻♻♻ Driver ${driver["driverId"]} data processing success`);
     }
     console.log(`[${new Date().toISOString()}] Upsert complete!`);
 
   } catch (error) {
     console.error("❌❌❌Error during upsert:", error.message);
   } finally {
-    await connection.end();
+    if (connection) await connection.release();
   }
 }
 
@@ -164,11 +229,11 @@ async function fetchAndUpsertDrivers() {
     const rawDrivers = await fetchDrivers(apiToken);
     const driverAndDispatcher = await getAllDispatchersData(apiToken);
 
-    const drivers = rawDrivers.map((d, index) => {
+    const drivers = rawDrivers.map((d) => {
       let convertedDriverId = d.driverId;
       let dispatcher = driverAndDispatcher[convertedDriverId];
       return (
-        { 'id': index+1,
+        {
           'driverId': convertedDriverId,
           'status': d.status,
           'firstName': d.firstName,
@@ -178,14 +243,15 @@ async function fetchAndUpsertDrivers() {
           'email': d.emailAddress,
           'hiredOn': d.hiredOn,
           'updatedOn': d.updatedOn,
-          'conpanyId': d.companyId,
-          'dispatcher':dispatcher,
+          'companyId': d.companyId,
+          'dispatcher': dispatcher,
+          // Add other fields as needed, ensure all required DB fields are mapped
         }
       )
     });
 
+    await upsertDrivers(drivers);
     return drivers;
-    // await upsertDrivers(drivers);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error:`, error.message);
   }
@@ -200,9 +266,10 @@ function scheduleDriverUpdates(intervalMs) {
   }, intervalMs);
 
   // Graceful shutdown
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log('Shutting down, clearing scheduled updates.');
     clearInterval(intervalId);
+    await pool.end();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

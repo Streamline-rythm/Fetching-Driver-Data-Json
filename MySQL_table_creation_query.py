@@ -1,6 +1,5 @@
 CREATE TABLE dev.driversDirectory (
-  id INT PRIMARY KEY,
-  driverId VARCHAR(100),
+  driverId VARCHAR(100) PRIMARY KEY,
   status VARCHAR(100),
   firstName VARCHAR(100),
   lastName VARCHAR(100),
