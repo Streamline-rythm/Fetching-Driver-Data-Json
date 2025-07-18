@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname } from 'path';
 
 dotenv.config();
 
@@ -41,7 +41,7 @@ const dispatcherIDs = [
 
 // Get API token
 async function getApiToken() {
-  console.log("--------------- Getting API token ----------------");
+  console.log("---------------------- Getting API token -------------------");
   const headers = {
     "Ditat-Application-Role": "Login to TMS",
     "ditat-account-id": "agylogistics",
@@ -50,11 +50,11 @@ async function getApiToken() {
   try {
     const { data } = await axios.post(GETTING_TOKEN_URL, {}, { headers });
     if (data) {
-      console.log(`✔✔✔API token= ${JSON.stringify(data)}`);
+      console.log(`✔✔✔ API token= ${JSON.stringify(data)}`);
       return data;
     }
   } catch (error) {
-    console.error("❌❌❌Error getting API token:", error.message);
+    console.error("❌❌❌ Error getting API token:", error.message);
     throw error;
   }
   return null;
@@ -78,11 +78,11 @@ async function fetchDrivers(apiToken) {
   try {
     const { data } = await axios.post(GETTING_ALL_DRIVERS_URL, body, { headers });
     if (data) {
-      console.log("✔✔✔Fetching drivers data Success");
+      console.log("✔✔✔ Fetching drivers data Success");
       return data?.data?.data || [];
     }
   } catch (error) {
-    console.error("❌❌❌Error fetching drivers:", error.message);
+    console.error("❌❌❌ Error fetching drivers:", error.message);
     throw error;
   }
   return [];
@@ -90,11 +90,11 @@ async function fetchDrivers(apiToken) {
 
 // Fetch All Dispatchers data
 async function getAllDispatchersData(apiToken) {
-  console.log("-------------------Getting Dispatchers ---------------------");
+  console.log("---------------------- Getting Dispatchers ---------------------");
   const driverAndDispatcher = {};
 
   for (const individualDispatcher of dispatcherIDs) {
-    console.log(`✔✔✔ Retrieving ${dispatcherIdAndName[individualDispatcher]}'s drivers`);
+    // console.log(`✔✔✔ Retrieving ${dispatcherIdAndName[individualDispatcher]}'s drivers`);
     const each_dispatcher_url = `${GETTING_DISPATCHERS_URL}/${individualDispatcher}/item`;
     console.log(`✔✔✔ ${dispatcherIdAndName[individualDispatcher]}'s API calling url=${each_dispatcher_url}`);
 
@@ -134,7 +134,7 @@ async function upsertDrivers(drivers) {
   console.log("Database connection success");
 
   const sql = `
-    INSERT INTO drivers (driverId, driver_data)
+    INSERT INTO drivers (id, driverId, status, firstName, lastName, truckId, phoneNumber, email, hiredOn, updatedOn, companyId, dispatcher, firstLanguage, secondLanguage, globalDnd, safetyCall, safetyMessage, hosSupport, maintainanceCall, maintainanceMessage, dispatchCall, dispatchMessage, accountCall, accountMessage)
     VALUES (?, ?)
     ON DUPLICATE KEY UPDATE driver_data = VALUES(driver_data)
   `;
@@ -164,36 +164,32 @@ async function fetchAndUpsertDrivers() {
     const rawDrivers = await fetchDrivers(apiToken);
     const driverAndDispatcher = await getAllDispatchersData(apiToken);
 
-    console.log(driverAndDispatcher);
-
-    const drivers = rawDrivers.map((d) => {
+    const drivers = rawDrivers.map((d, index) => {
       let convertedDriverId = d.driverId;
       let dispatcher = driverAndDispatcher[convertedDriverId];
-      console.log(convertedDriverId);
-      console.log(dispatcher);
       return (
-        [convertedDriverId,
-          d.status,
-          d.firstName,
-          d.lastName,
-          d.truckId,
-          d.phoneNumber,
-          d.emailAddress,
-          d.hiredOn,
-          d.updatedOn,
-          d.companyId,
-          dispatcher,
-        ]
+        { 'id': index+1,
+          'driverId': convertedDriverId,
+          'status': d.status,
+          'firstName': d.firstName,
+          'lastName': d.lastName,
+          'truckId': d.truckId,
+          'phoneNumber': d.phoneNumber,
+          'email': d.emailAddress,
+          'hiredOn': d.hiredOn,
+          'updatedOn': d.updatedOn,
+          'conpanyId': d.companyId,
+          'dispatcher':dispatcher,
+        }
       )
     });
 
-    await upsertDrivers(drivers);
+    return drivers;
+    // await upsertDrivers(drivers);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error:`, error.message);
   }
 }
-
-// --- Improved Scheduling Logic ---
 
 // Function to schedule periodic updates
 function scheduleDriverUpdates(intervalMs) {
