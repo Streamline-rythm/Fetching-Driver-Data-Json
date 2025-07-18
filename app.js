@@ -79,9 +79,21 @@ const pool = mysql.createPool({
   }
 });
 
+// Convert phoneNumber
+function formatPhoneNumber(number) {
+  const cleaned = number.replace(/\D/g, ''); // Remove non-digit characters
+  if (cleaned.length !== 10) return 'Invalid number';
+
+  const areaCode = cleaned.slice(0, 3);
+  const centralOffice = cleaned.slice(3, 6);
+  const lineNumber = cleaned.slice(6, 10);
+
+  return `(${areaCode}) ${centralOffice}-${lineNumber}`;
+}
+
 // Get API token
 async function getApiToken() {
-  console.log("---------------------- Getting API token -------------------");
+  console.log("---------------------- Getting API token ----------------------");
   const headers = {
     "Ditat-Application-Role": DITAT_APPLICATION_ROLE,
     "ditat-account-id": DITAT_ACCOUNT_ID,
@@ -130,11 +142,10 @@ async function fetchDrivers(apiToken) {
 
 // Fetch All Dispatchers data
 async function getAllDispatchersData(apiToken) {
-  console.log("---------------------- Getting Dispatchers ---------------------");
+  console.log("---------------------- Getting Dispatchers ----------------------");
   const driverAndDispatcher = {};
 
   for (const individualDispatcher of dispatcherIDs) {
-    // console.log(`✔✔✔ Retrieving ${dispatcherIdAndName[individualDispatcher]}'s drivers`);
     const each_dispatcher_url = `${GETTING_DISPATCHERS_URL}/${individualDispatcher}/item`;
     console.log(`✔✔✔ ${dispatcherIdAndName[individualDispatcher]}'s API calling url=${each_dispatcher_url}`);
 
@@ -165,17 +176,11 @@ async function upsertDrivers(drivers) {
     console.log("Database connection success");
 
     const sql = `
-    INSERT INTO drivers (
+    INSERT INTO driversDirectory (
       driverId, status, firstName, lastName, truckId, phoneNumber, email, hiredOn, updatedOn,
-      companyId, dispatcher, firstLanguage, secondLanguage,
-      globalDnd, safetyCall, safetyMessage, hosSupport,
-      maintainanceCall, maintainanceMessage,
-      dispatchCall, dispatchMessage,
-      accountCall, accountMessage
+      companyId, dispatcher
     )
-    VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       status = VALUES(status),
       firstName = VALUES(firstName),
@@ -183,32 +188,18 @@ async function upsertDrivers(drivers) {
       truckId = VALUES(truckId),
       phoneNumber = VALUES(phoneNumber),
       email = VALUES(email),
+      hiredOn = VALUES(updatedOn),
       updatedOn = VALUES(updatedOn),
       companyId = VALUES(companyId),
-      dispatcher = VALUES(dispatcher),
-      firstLanguage = VALUES(firstLanguage),
-      secondLanguage = VALUES(secondLanguage),
-      globalDnd = VALUES(globalDnd),
-      safetyCall = VALUES(safetyCall),
-      safetyMessage = VALUES(safetyMessage),
-      hosSupport = VALUES(hosSupport),
-      maintainanceCall = VALUES(maintainanceCall),
-      maintainanceMessage = VALUES(maintainanceMessage),
-      dispatchCall = VALUES(dispatchCall),
-      dispatchMessage = VALUES(dispatchMessage),
-      accountCall = VALUES(accountCall),
-      accountMessage = VALUES(accountMessage)
-  `;
+      dispatcher = VALUES(dispatcher)
+    `;
 
     for (const driver of drivers) {
       const params = [
         driver["driverId"], driver["status"], driver["firstName"], driver["lastName"], driver["truckId"],
-        driver["phoneNumber"], driver["email"], driver["hiredOn"], new Date(), driver["companyId"],
-        driver["dispatcher"], driver["firstLanguage"], driver["secondLanguage"], driver["globalDnd"],
-        driver["safetyCall"], driver["safetyMessage"], driver["hosSupport"], driver["maintainanceCall"],
-        driver["maintainanceMessage"], driver["dispatchCall"], driver["dispatchMessage"],
-        driver["accountCall"], driver["accountMessage"]
-      ];
+        driver["phoneNumber"], driver["email"], driver["hiredOn"], driver["updatedOn"], driver["companyId"],
+        driver["dispatcher"]
+      ].map(v => v === undefined ? null : v);
       await connection.execute(sql, params);
       console.log(`♻♻♻ Driver ${driver["driverId"]} data processing success`);
     }
@@ -232,6 +223,10 @@ async function fetchAndUpsertDrivers() {
     const drivers = rawDrivers.map((d) => {
       let convertedDriverId = d.driverId;
       let dispatcher = driverAndDispatcher[convertedDriverId];
+      let convertPhoneNumber = formatPhoneNumber(d.phoneNumber);
+      let convertHiredOn = d.hiredOn.split("T")[0];
+      let convertUpdatedOn = d.updatedOn.split("T")[0];
+      
       return (
         {
           'driverId': convertedDriverId,
@@ -239,10 +234,10 @@ async function fetchAndUpsertDrivers() {
           'firstName': d.firstName,
           'lastName': d.lastName,
           'truckId': d.truckId,
-          'phoneNumber': d.phoneNumber,
+          'phoneNumber': convertPhoneNumber,
           'email': d.emailAddress,
-          'hiredOn': d.hiredOn,
-          'updatedOn': d.updatedOn,
+          'hiredOn': convertHiredOn,
+          'updatedOn': convertUpdatedOn,
           'companyId': d.companyId,
           'dispatcher': dispatcher,
           // Add other fields as needed, ensure all required DB fields are mapped
